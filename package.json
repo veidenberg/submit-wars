@@ -1,0 +1,24 @@
+{
+  "name": "toggl-to-confluence",
+  "version": "1.0.0",
+  "description": "Automate weekly WAR reports by fetching Toggl data and posting to Confluence",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "start:verbose": "ts-node src/index.ts --verbose",
+    "fill-all-weeks": "ts-node src/index.ts --fill-all-weeks",
+    "fill-all-weeks:verbose": "ts-node src/index.ts --fill-all-weeks --verbose",
+    "build": "tsc",
+    "lint": "eslint src/**/*.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "date-fns": "^3.3.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
