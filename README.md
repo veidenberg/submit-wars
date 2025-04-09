@@ -1,13 +1,6 @@
-# Automated WARS submitter
+# WARs submitter
 
-This tool fetches time records from a Toggl Track account and posts these to Webteam WARs confluence page in the correct format. It can add the most recent week or backfill all missing weeks on the WARs page.
-
-## Table of Contents
-
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
-- [License](#license)
+This python script fetches time records from a Toggl Track account and posts these to Webteam WARs Confluence page in the correct format. It can add the most recent week or backfill the whole year.
 
 ## Installation
 
@@ -15,25 +8,24 @@ This tool fetches time records from a Toggl Track account and posts these to Web
    ```
    git clone https://github.com/veidenberg/warfiller
    cd warfiller
-   npm install
+   pip install -r requirements.txt
    ```
 
-2. Create a `.env` file from `.env.example` and fill in your Toggl and Confluence credentials.
+2. Create a `.env` file from `.env.example` and fill in the missing values (credentials, name).
 
 ## Usage
 
-To update the Confluence page with a report for the most recent completed work week:
+Update the Confluence page with your WAR records for the most recent complete week:
 ```
-npm start
+./submit_wars.py
 ```
-With debug messages:
+
+Backfill WARs for all missing weeks in the current year:
 ```
-npm run start:verbose
+./submit_wars.py --fill-all-weeks
 ```
-Backfill reports for all missing weeks in the current year:
-```
-npm run fill-all-weeks # or fill-all-weeks:verbose
-```
+
+Add `--verbose` for debug output.
 
 ## License
 
