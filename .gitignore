@@ -1,3 +1,4 @@
 .mypy_cache
+venv
 *.log
 *.env

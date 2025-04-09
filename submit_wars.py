@@ -202,10 +202,27 @@ class TogglService(ApiService):
         # Check if start_date is earlier than earliest allowed date
         if self.earliest_allowed_date and start_date < self.earliest_allowed_date:
             logging.debug(f"Start date {start_date.isoformat()} is earlier than the earliest allowed date {self.earliest_allowed_date.isoformat()}")
-            logging.debug("Adjusting start date to the earliest allowed date")
             start_date = self.earliest_allowed_date
         
-        endpoint = f"/me/time_entries?start_date={start_date.isoformat()}&end_date={end_date.isoformat()}"
+        # Check if dates are in the future
+        current_time = datetime.now()
+        if start_date > current_time:
+            logging.debug(f"Start date {start_date.isoformat()} is in the future, adjusting to current time")
+            start_date = current_time
+        
+        if end_date > current_time:
+            logging.debug(f"End date {end_date.isoformat()} is in the future, adjusting to current time")
+            end_date = current_time
+        
+        # If end date is now before start date after adjustments, use start date as end date
+        if end_date < start_date:
+            end_date = start_date
+
+        # Format dates using YYYY-MM-DD format for API request
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        endpoint = f"/me/time_entries?start_date={start_date_str}&end_date={end_date_str}"
         
         try:
             time_records = self.get(endpoint, self.get_toggl_headers())

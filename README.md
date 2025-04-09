@@ -17,12 +17,12 @@ This python script fetches time records from a Toggl Track account and posts the
 
 Update the Confluence page with your WAR records for the most recent complete week:
 ```
-./submit_wars.py
+python submit_wars.py
 ```
 
 Backfill WARs for all missing weeks in the current year:
 ```
-./submit_wars.py --fill-all-weeks
+python submit_wars.py --fill-all-weeks
 ```
 
 Add `--verbose` for debug output.
