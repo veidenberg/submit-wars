@@ -304,8 +304,7 @@ export class ConfluenceService {
                         const day = parseInt(weekMatch[1]);
                         const monthNum = parseInt(weekMatch[2]) - 1; // JS months are 0-indexed
                         
-                        // Create a date object for this week (use current year for simplicity)
-                        // We only care about the order, not the exact year
+                        // Create a date object for this week
                         const date = new Date();
                         date.setMonth(monthNum);
                         date.setDate(day);
@@ -322,7 +321,7 @@ export class ConfluenceService {
                 // Parse the new week date
                 const [newDay, newMonth] = weekEndDate.split('/').map(Number);
                 const newDate = new Date();
-                newDate.setMonth(newMonth - 1); // JS months are 0-indexed
+                newDate.setMonth(newMonth - 1);
                 newDate.setDate(newDay);
                 
                 // Create the week section to insert

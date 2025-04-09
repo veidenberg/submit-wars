@@ -1,10 +1,8 @@
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Explicitly load the .env file from the project root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-// Check for verbose flag in command line arguments
 const isVerboseMode = process.argv.includes('--verbose');
 
 export const config = {

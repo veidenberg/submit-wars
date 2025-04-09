@@ -1,6 +1,6 @@
-# Toggl to Confluence Automation
+# Automated WARS submitter
 
-This project automates the process of fetching time records from a Toggl Track account and posting them to a Confluence page in a formatted manner. It is designed to streamline the creation of weekly WAR (Work Activity Report) reports.
+This tool fetches time records from a Toggl Track account and posts these to Webteam WARs confluence page in the correct format. It can add the most recent week or backfill all missing weeks on the WARs page.
 
 ## Table of Contents
 
@@ -11,26 +11,16 @@ This project automates the process of fetching time records from a Toggl Track a
 
 ## Installation
 
-1. Clone the repository:
+1. Clone and install:
    ```
-   git clone <repository-url>
-   cd toggl-to-confluence
-   ```
-
-2. Install the dependencies:
-   ```
+   git clone https://github.com/veidenberg/warfiller
+   cd warfiller
    npm install
    ```
 
-3. Create a `.env` file based on the `.env.example` file and fill in your Toggl and Confluence credentials.
-
-## Configuration
-
-The configuration settings, including API keys and endpoints, are located in `src/config/config.ts`. Ensure that you have the correct API tokens for both Toggl Track and Confluence.
+2. Create a `.env` file from `.env.example` and fill in your Toggl and Confluence credentials.
 
 ## Usage
-
-### Generate Report for Most Recent Week
 
 To update the Confluence page with a report for the most recent completed work week:
 ```
