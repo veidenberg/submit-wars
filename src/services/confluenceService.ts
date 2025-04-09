@@ -1,9 +1,7 @@
-import axios from 'axios';
+import { ApiService } from './apiService';
 import { config } from '../config/config';
 
-export class ConfluenceService {
-    private confluenceBaseUrl: string;
-    private confluenceApiToken: string;
+export class ConfluenceService extends ApiService {
     private confluenceSpaceKey: string;
     private confluencePageId: string;
     private confluenceUsername: string;
@@ -17,8 +15,7 @@ export class ConfluenceService {
         confluenceUsername: string,
         confluenceDisplayName?: string
     ) {
-        this.confluenceBaseUrl = confluenceBaseUrl;
-        this.confluenceApiToken = confluenceApiToken;
+        super(confluenceBaseUrl, confluenceApiToken);
         this.confluenceSpaceKey = confluenceSpaceKey;
         this.confluencePageId = confluencePageId;
         this.confluenceUsername = confluenceUsername;
@@ -81,21 +78,22 @@ export class ConfluenceService {
     }
 
     private async getPageContent(): Promise<{ content: string, title: string, version: number }> {
-        const url = `${this.confluenceBaseUrl}/rest/api/content/${this.confluencePageId}?expand=body.storage,version`;
-        if (config.app.debug) console.log(`[DEBUG] Fetching current page content: ${url}`);
+        const endpoint = `/rest/api/content/${this.confluencePageId}?expand=body.storage,version`;
+        if (config.app.debug) console.log(`[DEBUG] Fetching current page content`);
         
         try {
-            const response = await axios.get(url, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.confluenceApiToken}`
-                }
+            const response = await this.get<{
+                body: { storage: { value: string } },
+                title: string,
+                version: { number: number }
+            }>(endpoint, {
+                'Authorization': `Bearer ${this.apiToken}`
             });
             
             return {
-                content: response.data.body.storage.value,
-                title: response.data.title,
-                version: response.data.version.number
+                content: response.body.storage.value,
+                title: response.title,
+                version: response.version.number
             };
         } catch (error) {
             if (config.app.debug) console.error('[DEBUG] Error fetching page content:', error);
@@ -104,15 +102,13 @@ export class ConfluenceService {
     }
     
     private async savePage(title: string, content: string, currentVersion: number): Promise<void> {
-        const url = `${this.confluenceBaseUrl}/rest/api/content/${this.confluencePageId}`;
-        if (config.app.debug) console.log(`[DEBUG] Updating Confluence page: ${url}`);
+        const endpoint = `/rest/api/content/${this.confluencePageId}`;
+        if (config.app.debug) console.log(`[DEBUG] Updating Confluence page`);
         
         try {
             const payload = {
-                version: {
-                    number: currentVersion + 1
-                },
-                title: title, // Keep the original page title
+                version: { number: currentVersion + 1 },
+                title: title,
                 type: 'page',
                 body: {
                     storage: {
@@ -122,18 +118,11 @@ export class ConfluenceService {
                 }
             };
             
-            const response = await axios.put(url, payload, {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.confluenceApiToken}`
-                }
+            const response = await this.put<any>(endpoint, payload, {
+                'Authorization': `Bearer ${this.apiToken}`
             });
 
-            if (config.app.debug) console.log(`[DEBUG] Confluence update response status: ${response.status}`);
-            
-            if (response.status !== 200) {
-                throw new Error(`Failed to update Confluence page: ${response.status}`);
-            }
+            if (config.app.debug) console.log(`[DEBUG] Confluence update response status: ${response ? 'success' : 'failure'}`);
         } catch (error) {
             if (config.app.debug) console.error('[DEBUG] Error updating Confluence page:', error);
             throw error;
