@@ -91,11 +91,13 @@ def get_last_week_dates():
         'end_date': last_friday
     }
 
-def get_all_weeks_in_year():
-    """Gets all weeks in the current year, from January 1st to current date"""
+def get_all_weeks_in_year(year=None):
+    """Gets all weeks in the specified year (or current year if not specified), from January 1st to current date"""
     weeks = []
     today = datetime.now()
-    current_year = today.year
+    
+    # Use specified year or current year
+    current_year = year if year is not None else today.year
     
     # Start from first day of the year
     start_date = datetime(current_year, 1, 1, 0, 0, 0)
@@ -111,8 +113,12 @@ def get_all_weeks_in_year():
     # Set to end of day for Fridays
     current_date = current_date.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    # Keep generating weeks until we reach the current date
-    while current_date <= today:
+    # For past years, go through all Fridays of the year
+    # For current year, only go up to the current date
+    end_date = datetime(current_year, 12, 31, 23, 59, 59, 999999) if current_year < today.year else today
+    
+    # Keep generating weeks until we reach the end date
+    while current_date <= end_date:
         # Create the week
         week_end_date = current_date
         week_start_date = week_end_date - timedelta(days=4)  # Monday is 4 days before Friday
@@ -739,11 +745,11 @@ def process_week(toggl_service, confluence_service, date_range, existing_project
     logging.debug(f"Posting report for week ending {week_date_str} to Confluence...")
     confluence_service.post_report(formatted_report, date_range)
 
-def fill_in_missing_weeks(toggl_service, confluence_service):
-    """Fill in reports for all missing weeks in the current year"""
-    # Get all weeks in the current year
-    all_weeks = get_all_weeks_in_year()
-    print(f"Found {len(all_weeks)} weeks in the current year to process.")
+def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
+    """Fill in reports for all missing weeks in the specified year"""
+    # Get all weeks in the year
+    all_weeks = get_all_weeks_in_year(year)
+    print(f"Found {len(all_weeks)} weeks in year {year or datetime.now().year} to process.")
     
     # Get the existing content to check which weeks are already reported
     existing_content = confluence_service.get_existing_content()
@@ -806,6 +812,7 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Toggl to Confluence Report Generator')
     parser.add_argument('--fill-all-weeks', action='store_true', help='Fill in all missing weeks in the current year')
+    parser.add_argument('--year', type=int, help='Specify the year to process (default: current year)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     args = parser.parse_args()
     
@@ -816,10 +823,15 @@ def main():
     global _app
     _app = config['app']
     
+    # Process the year argument
+    year = args.year
+    
     if args.verbose:
         print(f"Command line args: {vars(args)}")
         print("Running in verbose mode")
         print(f"Fill-in mode enabled: {args.fill_all_weeks}")
+        if year:
+            print(f"Processing year: {year}")
     
     # Validate environment variables
     validate_env_vars(config)
@@ -851,8 +863,9 @@ def main():
     
     try:
         if args.fill_all_weeks:
-            print("Fill-in mode activated. Will attempt to add reports for all missing weeks in the current year.")
-            fill_in_missing_weeks(toggl_service, confluence_service)
+            year_msg = f" for {year}" if year else ""
+            print(f"Fill-in mode activated. Will attempt to add reports for all missing weeks{year_msg}.")
+            fill_in_missing_weeks(toggl_service, confluence_service, year)
         else:
             # Regular mode - just process the most recent week
             print("Processing the most recent week...")

@@ -24,8 +24,7 @@ Backfill WARs for all missing weeks in the current year:
 ```
 python submit_wars.py --fill-all-weeks
 ```
-
-Add `--verbose` for debug output.
+Add `--year <year>` to process a specific year. Add `--verbose` for debug output.
 
 ## License
 
