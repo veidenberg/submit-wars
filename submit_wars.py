@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
+import html  # Add this import at the top of the file
 
 # ============================================================================
 # CONFIGURATION
@@ -90,27 +91,22 @@ class DateUtils:
     def get_all_weeks_in_year(year=None):
         """Gets all weeks in the specified year from January 1st to current date"""
         weeks = []
-        today = datetime.now()
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         current_year = year if year is not None else today.year
         
         # Start from first day of the year
-        current_date = datetime(current_year, 1, 1, 0, 0, 0)
+        current_date = datetime(current_year, 1, 1)
         
         # Find the first Friday
         days_until_friday = (4 - current_date.weekday()) % 7
         current_date += timedelta(days=days_until_friday)
-        current_date = current_date.replace(hour=23, minute=59, second=59, microsecond=999999)
         
         # End date is either end of year (past years) or today
         if current_year < today.year:
-            # Use the last day of the year for past years
-            end_date = datetime(current_year, 12, 31, 23, 59, 59)
             # Find the last Friday of December
-            last_day = end_date
+            last_day = datetime(current_year, 12, 31)
             days_to_friday = (last_day.weekday() - 4) % 7  # 4 = Friday
-            last_friday = last_day - timedelta(days=days_to_friday)
-            last_friday = last_friday.replace(hour=23, minute=59, second=59, microsecond=999999)
-            end_date = last_friday
+            end_date = last_day - timedelta(days=days_to_friday)
         else:
             # Use today for current year
             end_date = today
@@ -119,7 +115,6 @@ class DateUtils:
         while current_date <= end_date:
             week_end = current_date
             week_start = week_end - timedelta(days=4)
-            week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
             
             weeks.append({
                 'start_date': week_start,
@@ -224,7 +219,7 @@ class TogglService(ApiService):
         start_date_str = start_date.strftime('%Y-%m-%d')
         end_date_str = end_date.strftime('%Y-%m-%d')
 
-        # Use reports endpoint 
+        # Use reports API
         endpoint = f"/workspace/{self.workspace_id}/search/time_entries"
         
         try:
@@ -233,7 +228,6 @@ class TogglService(ApiService):
                 "end_date": end_date_str
             }
             
-            # Use the reports_api_url instead of the regular api_url
             url = f"{self.reports_api_url}{endpoint}"
             headers = self.get_toggl_headers()
             
@@ -278,18 +272,54 @@ class ConfluenceService(ApiService):
         self.page_id = page_id
         self.username = username
         self.display_name = display_name or username or 'Andres'
+        self.date_format = None  # Will store the detected date format
     
     def get_existing_content(self):
         """Retrieves the existing page content for analysis"""
         page_data = self.get_page_content()
+        # Choose date format for week titles
+        if not self.date_format:
+            self._detect_date_format(page_data['content'])
         return page_data['content']
+    
+    def _detect_date_format(self, content):
+        """Detect if page uses zero-padded dates or not"""
+        # Look for unpadded dates (e.g., "1/5" instead of "01/05")
+        unpadded_pattern = re.compile(r'<h2>w/e (\d{1}/\d{1,2}|\d{1,2}/\d{1})</h2>')
+        
+        # If we found unpadded dates, use that format
+        if unpadded_pattern.search(content):
+            self.date_format = "unpadded"
+            logging.debug("Detected unpadded date format (e.g. w/e 1/5)")
+        else:
+            # Default to padded format
+            self.date_format = "padded"
+            logging.debug("Using padded date format (e.g. w/e 01/05)")
     
     def _check_content_exists(self, content, week_end_date):
         """Check if week and user exist in content
         Returns a tuple of (week_exists, user_exists)"""
-        # Look for the week heading
-        week_pattern = re.compile(f'<h2>w/e {week_end_date}</h2>(.*?)(?=<h2>|$)', re.DOTALL)
+        # Look for the week heading - try both formats if needed
+        # The provided week_end_date might be in either format, so we need to normalize
+        day, month = week_end_date.split('/')
+        day_num = int(day)
+        month_num = int(month)
+        
+        # Generate both formats for comparison
+        padded_date = f"{day_num:02d}/{month_num:02d}"
+        unpadded_date = f"{day_num}/{month_num}"
+        
+        # Try the specific format we've detected first
+        search_date = padded_date if self.date_format == "padded" else unpadded_date
+        
+        week_pattern = re.compile(f'<h2>w/e {search_date}</h2>(.*?)(?=<h2>|$)', re.DOTALL)
         week_match = week_pattern.search(content)
+        
+        # If not found, try the other format
+        if not week_match:
+            alt_date = unpadded_date if self.date_format == "padded" else padded_date
+            alt_pattern = re.compile(f'<h2>w/e {alt_date}</h2>(.*?)(?=<h2>|$)', re.DOTALL)
+            week_match = alt_pattern.search(content)
         
         if not week_match:
             return False, False
@@ -312,7 +342,7 @@ class ConfluenceService(ApiService):
         current_page_data = self.get_page_content()
         
         # Use provided date range or current dates
-        week_info = DateUtils.get_week_info_from_date(date_range['end_date'] if date_range else None)
+        week_info = self.get_week_info_from_date(date_range['end_date'] if date_range else None)
         
         # Prepare updated content
         updated_content, status = self.prepare_updated_content(
@@ -362,12 +392,36 @@ class ConfluenceService(ApiService):
                 }
             }
             
-            self.put(endpoint, payload, {
-                'Authorization': f"Bearer {self.api_token}"
-            })
+            logging.debug(f"Updating page with new version: {current_version + 1}")
+            
+            # Use requests directly for better error handling
+            url = f"{self.base_url}{endpoint}"
+            headers = {'Authorization': f"Bearer {self.api_token}", 'Content-Type': 'application/json'}
+            
+            response = requests.put(url, json=payload, headers=headers)
+            
+            # Detailed error handling
+            if response.status_code != 200:
+                error_msg = f"Error updating Confluence page: {response.status_code} response"
+                try:
+                    error_details = response.json()
+                    if 'message' in error_details:
+                        error_msg += f"\nDetails: {error_details['message']}"
+                except:
+                    error_msg += f"\nResponse text: {response.text[:500]}"
+                
+                logging.error(error_msg)
+                raise Exception(error_msg)
+                
             logging.debug("Confluence page updated successfully")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error updating Confluence page: {str(e)}"
+            logging.error(error_msg)
+            raise Exception(error_msg)
         except Exception as e:
-            logging.error(f"Error updating Confluence page: {str(e)}")
+            error_msg = f"Error updating Confluence page: {str(e)}"
+            logging.error(error_msg)
             raise
     
     def prepare_updated_content(self, current_content, formatted_content, week_info):
@@ -507,6 +561,21 @@ class ConfluenceService(ApiService):
                        reverse=True)
         
         return "".join(sections[month] for month in months)
+    
+    def get_week_info_from_date(self, date=None):
+        """Get month name and week ending date from a date, using the detected format"""
+        date = date or DateUtils.get_last_friday()
+        
+        # Format date according to detected pattern (or default to padded)
+        if self.date_format == "unpadded":
+            week_end_date = date.strftime('%-d/%-m')  # No leading zeros
+        else:
+            week_end_date = date.strftime('%d/%m')    # With leading zeros
+        
+        return {
+            'month': date.strftime('%B'),
+            'week_end_date': week_end_date
+        }
 
 # ============================================================================
 # FORMATTING UTILITIES
@@ -521,31 +590,34 @@ def format_time_records(time_records, project_map):
     project_groups = {}
     for record in time_records:
         project_id = record.get('project_id')
-        project_name = project_map.get(project_id, 'No Project') if project_id else 'No Project'
+        project_name = project_map.get(project_id, 'Other') if project_id else 'Other'
         
         if project_name not in project_groups:
             project_groups[project_name] = set()
         
         description = record.get('description', '').strip()
         if description:
-            project_groups[project_name].add(description)
+            # Escape HTML special characters to prevent parsing errors
+            escaped_description = html.escape(description)
+            project_groups[project_name].add(escaped_description)
     
     # Format as HTML list
-    html = ['<ul>']
+    html_output = ['<ul>']
     for project_name in sorted(project_groups.keys()):
-        html.append(f"<li>{project_name}")
+        escaped_project = html.escape(project_name)
+        html_output.append(f"<li>{escaped_project}")
         
         tasks = sorted(project_groups[project_name])
         if tasks:
-            html.append('<ul>')
+            html_output.append('<ul>')
             for task in tasks:
-                html.append(f"<li>{task}</li>")
-            html.append('</ul>')
+                html_output.append(f"<li>{task}</li>")
+            html_output.append('</ul>')
         
-        html.append('</li>')
-    html.append('</ul>')
+        html_output.append('</li>')
+    html_output.append('</ul>')
     
-    return "\n".join(html)
+    return "\n".join(html_output)
 
 # ============================================================================
 # MAIN APPLICATION LOGIC
@@ -589,7 +661,7 @@ def process_week(toggl_service, confluence_service, date_range, existing_project
     confluence_service.post_report(formatted_report, date_range)
 
 def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
-    """Fill in reports for all missing weeks in the specified year"""
+    """Fill in reports for all weeks in the specified year in a single update"""
     all_weeks = DateUtils.get_all_weeks_in_year(year)
     year_str = year or datetime.now().year
     logging.info(f"Found {len(all_weeks)} weeks in {year_str} to process.")
@@ -601,37 +673,87 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
     project_map = toggl_service.fetch_projects()
     
     stats = {'processed': 0, 'skipped': 0, 'errors': 0, 'no_data': 0}
-    
-    # Process newest weeks first to find API limits
+    weeks_to_process = []
+
+    # Process newest weeks first
     reversed_weeks = list(reversed(all_weeks))
     
+    # First pass: collect all weeks that need processing
     for i, week in enumerate(reversed_weeks):
-        week_end_date_str = week['end_date'].strftime('%d/%m')
+        # Use Confluence's format detection for week end date
+        week_info = confluence_service.get_week_info_from_date(week['end_date'])
+        week_end_date_str = week_info['week_end_date']
+        
         week_index = len(all_weeks) - i
         logging.info(f"[{week_index}/{len(all_weeks)}] Week ending {week_end_date_str}")
         
-        # Skip if already exists
-        if confluence_service.has_week_for_user(existing_content, week_end_date_str):
-            logging.info(f"✓ Already exists. Skipping.")
+        # Check if the week already exists
+        week_exists = confluence_service.has_week_for_user(existing_content, week_end_date_str)
+        if week_exists:
+            logging.info(f"✓ Report already exists for week ending {week_end_date_str}. Skipping.")
             stats['skipped'] += 1
             continue
         
         try:
-            process_week(toggl_service, confluence_service, week, project_map)
-            stats['processed'] += 1
-            
-            # Add delay between requests
-            if i < len(reversed_weeks) - 1:
-                import time
-                time.sleep(2)
-                
-        except Exception as e:
-            if "No time records found" in str(e):
+            # Fetch time records and format the report
+            time_records = toggl_service.fetch_time_records(week['start_date'], week['end_date'])
+            if not time_records:
                 logging.info(f"ℹ No time entries found for this week. Skipping.")
                 stats['no_data'] += 1
+                continue
             else:
-                logging.error(f"✗ Error: {str(e)}")
-                stats['errors'] += 1
+                formatted_report = format_time_records(time_records, project_map)
+                stats['processed'] += 1
+            
+            # Store this week for batch processing
+            weeks_to_process.append({
+                'month': week_info['month'],
+                'week_end_date': week_end_date_str,
+                'content': formatted_report
+            })
+            
+        except Exception as e:
+            logging.error(f"✗ Error processing week: {str(e)}")
+            stats['errors'] += 1
+    
+    # If we have weeks to process, update the page in a single batch
+    if weeks_to_process:
+        try:
+            # Get current page content
+            current_page_data = confluence_service.get_page_content()
+            current_content = current_page_data['content']
+            
+            # Extract all month sections from current content
+            month_sections = confluence_service.extract_month_sections(current_content)
+            
+            # Add all collected weeks to the appropriate sections
+            for week in weeks_to_process:
+                month_sections = confluence_service.add_content_to_sections(
+                    month_sections, 
+                    week['month'],
+                    week['week_end_date'],
+                    week['content']
+                )
+            
+            # Generate the final content with proper month ordering
+            final_content = confluence_service.regenerate_ordered_content(month_sections)
+            
+            # Update the page with all changes at once
+            if final_content != current_content:
+                confluence_service.save_page(
+                    current_page_data['title'],
+                    final_content,
+                    current_page_data['version']
+                )
+                logging.info(f"Successfully updated {len(weeks_to_process)} weeks in a single batch.")
+            else:
+                logging.info("No changes needed to the page content.")
+                
+        except Exception as e:
+            logging.error(f"✗ Error updating Confluence in batch: {str(e)}")
+            stats['errors'] += 1
+    else:
+        logging.info("No content to update. All weeks already exist or have no data.")
     
     print_summary(stats, len(all_weeks))
 
@@ -666,21 +788,8 @@ def main():
     validate_env_vars(config)
     
     # Initialize services
-    toggl_service = TogglService(
-        config['toggl']['api_token'] or '',
-        config['toggl']['api_url'] or '',
-        config['toggl']['workspace_id'] or '',
-        config['toggl']['reports_api_url'] or ''
-    )
-    
-    confluence_service = ConfluenceService(
-        config['confluence']['base_url'] or '',
-        config['confluence']['api_token'] or '',
-        config['confluence']['space_key'] or '',
-        config['confluence']['page_id'] or '',
-        config['confluence']['username'] or '',
-        config['confluence']['display_name'] or ''
-    )
+    toggl_service = TogglService(**config['toggl'])
+    confluence_service = ConfluenceService(**config['confluence'])
     
     try:
         if args.fill_all_weeks:
