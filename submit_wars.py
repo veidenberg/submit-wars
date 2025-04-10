@@ -35,7 +35,7 @@ def load_config():
             'api_token': os.getenv('TOGGL_API_TOKEN'),
             'workspace_id': os.getenv('TOGGL_WORKSPACE_ID'),
             'api_url': 'https://api.track.toggl.com/api/v9',
-            'report_api_url': 'https://api.track.toggl.com/reports/api/v2',
+            'reports_api_url': 'https://api.track.toggl.com/reports/api/v3',
         },
         'confluence': {
             'username': os.getenv('CONFLUENCE_USERNAME'),
@@ -101,8 +101,19 @@ class DateUtils:
         current_date += timedelta(days=days_until_friday)
         current_date = current_date.replace(hour=23, minute=59, second=59, microsecond=999999)
         
-        # End date is either end of year or today
-        end_date = datetime(current_year, 12, 31, 23, 59, 59) if current_year < today.year else today
+        # End date is either end of year (past years) or today
+        if current_year < today.year:
+            # Use the last day of the year for past years
+            end_date = datetime(current_year, 12, 31, 23, 59, 59)
+            # Find the last Friday of December
+            last_day = end_date
+            days_to_friday = (last_day.weekday() - 4) % 7  # 4 = Friday
+            last_friday = last_day - timedelta(days=days_to_friday)
+            last_friday = last_friday.replace(hour=23, minute=59, second=59, microsecond=999999)
+            end_date = last_friday
+        else:
+            # Use today for current year
+            end_date = today
         
         # Generate weeks until we reach the end date
         while current_date <= end_date:
@@ -183,10 +194,10 @@ class ApiService:
 class TogglService(ApiService):
     """Service for interacting with the Toggl API"""
     
-    def __init__(self, api_token, api_url, workspace_id):
+    def __init__(self, api_token, api_url, workspace_id, reports_api_url=None):
         super().__init__(api_url, api_token)
         self.workspace_id = workspace_id
-        self.earliest_allowed_date = None
+        self.reports_api_url = reports_api_url or api_url
         
         # Validate required fields
         if not api_token:
@@ -203,56 +214,36 @@ class TogglService(ApiService):
         }
     
     def fetch_time_records(self, start_date, end_date):
-        """Fetch time records from Toggl API"""
-        # Adjust dates if needed
-        start_date, end_date = self._adjust_date_range(start_date, end_date)
-        
+        """Fetch time records from Toggl Reports API"""
+
         if start_date >= end_date:
-            logging.debug("Start date is after end date after adjustments")
+            logging.debug("Start date is after end date")
             return []
 
         # Format dates for API request
         start_date_str = start_date.strftime('%Y-%m-%d')
         end_date_str = end_date.strftime('%Y-%m-%d')
-        
-        endpoint = f"/me/time_entries?start_date={start_date_str}&end_date={end_date_str}"
+
+        # Use reports endpoint 
+        endpoint = f"/workspace/{self.workspace_id}/search/time_entries"
         
         try:
-            time_records = self.get(endpoint, self.get_toggl_headers())
-            logging.debug(f"Retrieved {len(time_records)} time entries from Toggl")
+            payload = {
+                "start_date": start_date_str,
+                "end_date": end_date_str
+            }
+            
+            # Use the reports_api_url instead of the regular api_url
+            url = f"{self.reports_api_url}{endpoint}"
+            headers = self.get_toggl_headers()
+            
+            response = requests.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            time_records = response.json()
+            
             return time_records
         except Exception as e:
-            error_message = str(e)
-            
-            # Handle "start_date must not be earlier than" error
-            if "start_date must not be earlier than" in error_message:
-                date_match = re.search(r"than (\d{4}-\d{2}-\d{2})", error_message)
-                if date_match:
-                    earliest_date = datetime.fromisoformat(date_match.group(1))
-                    self.earliest_allowed_date = earliest_date
-                    logging.debug(f"Toggl API restriction: earliest allowed date is {earliest_date.isoformat()}")
-                    return self.fetch_time_records(earliest_date, end_date)
-            
-            raise Exception(f"Failed to fetch time records: {error_message}")
-    
-    def _adjust_date_range(self, start_date, end_date):
-        """Adjust date range based on API limitations and current time"""
-        # Check if start_date is earlier than earliest allowed date
-        if self.earliest_allowed_date and start_date < self.earliest_allowed_date:
-            logging.debug(f"Start date {start_date.isoformat()} is earlier than the earliest allowed date {self.earliest_allowed_date.isoformat()}")
-            start_date = self.earliest_allowed_date
-        
-        # Adjust future dates to current time
-        current_time = datetime.now()
-        if start_date > current_time:
-            start_date = current_time
-            logging.debug(f"Start date adjusted to current time: {start_date.isoformat()}")
-            
-        if end_date > current_time:
-            end_date = current_time
-            logging.debug(f"End date adjusted to current time: {end_date.isoformat()}")
-            
-        return start_date, end_date
+            raise Exception(f"Failed to fetch time records: {e}")
     
     def fetch_projects(self):
         """Fetch projects from Toggl API"""
@@ -529,7 +520,7 @@ def format_time_records(time_records, project_map):
     # Group time entries by project and task
     project_groups = {}
     for record in time_records:
-        project_id = record.get('pid')
+        project_id = record.get('project_id')
         project_name = project_map.get(project_id, 'No Project') if project_id else 'No Project'
         
         if project_name not in project_groups:
@@ -591,9 +582,8 @@ def process_week(toggl_service, confluence_service, date_range, existing_project
     if not time_records:
         raise Exception("No time records found for this period")
     
-    # Debug info
-    if time_records and logging.getLogger().level == logging.DEBUG:
-        logging.debug(f"Sample time record: {json.dumps(time_records[0:1])}")
+    #if time_records and logging.getLogger().level == logging.DEBUG:
+    #    logging.debug(f"Sample time record: {json.dumps(time_records[0:1])}")
     
     formatted_report = format_time_records(time_records, project_map)
     confluence_service.post_report(formatted_report, date_range)
@@ -678,8 +668,9 @@ def main():
     # Initialize services
     toggl_service = TogglService(
         config['toggl']['api_token'] or '',
-        config['toggl']['api_url'],
-        config['toggl']['workspace_id'] or ''
+        config['toggl']['api_url'] or '',
+        config['toggl']['workspace_id'] or '',
+        config['toggl']['reports_api_url'] or ''
     )
     
     confluence_service = ConfluenceService(
@@ -687,8 +678,8 @@ def main():
         config['confluence']['api_token'] or '',
         config['confluence']['space_key'] or '',
         config['confluence']['page_id'] or '',
-        config['confluence']['username'] or 'Andres',
-        config['confluence']['display_name']
+        config['confluence']['username'] or '',
+        config['confluence']['display_name'] or ''
     )
     
     try:

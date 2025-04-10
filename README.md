@@ -1,13 +1,13 @@
-# WARs submitter
+# Submit WARs
 
-This python script fetches time records from a Toggl Track account and posts these to Webteam WARs Confluence page in the correct format. It can add the most recent week or backfill the whole year.
+It's time to submit WARs - with a single command. This python script fetches time records from your Toggl Track account and posts these to Webteam WARs Confluence page in the correct format. It can add the most recent week or backfill the whole year.
 
-## Installation
+## Setup
 
 1. Clone and install:
    ```
-   git clone https://github.com/veidenberg/warfiller
-   cd warfiller
+   git clone https://github.com/veidenberg/submit-wars
+   cd submit-wars
    pip install -r requirements.txt
    ```
 
