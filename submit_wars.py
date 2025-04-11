@@ -136,6 +136,33 @@ class DateUtils:
             'week_end_date': date.strftime('%d/%m')
         }
 
+    @staticmethod
+    def get_current_week_dates():
+        """Gets the date range for the current work week (Monday through Friday)"""
+        today = datetime.now()
+        
+        # Find Monday of current week
+        day_of_week = today.weekday()  # 0=Monday, 1=Tuesday, ..., 6=Sunday
+        days_since_monday = day_of_week
+        monday_of_current_week = today - timedelta(days=days_since_monday)
+        monday_of_current_week = monday_of_current_week.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # End date is either today or upcoming Friday if today is before Friday
+        if day_of_week < 4:  # Before Friday
+            days_to_friday = 4 - day_of_week
+            end_date = today + timedelta(days=days_to_friday)
+        else:  # Friday or weekend
+            end_date = today
+            
+        end_date = end_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        logging.debug(f"Current work week: {monday_of_current_week.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        return {
+            'start_date': monday_of_current_week,
+            'end_date': end_date
+        }
+
 # ============================================================================
 # API SERVICE
 # ============================================================================
@@ -773,6 +800,7 @@ def main():
     parser.add_argument('--fill-all-weeks', action='store_true', help='Fill in all missing weeks in the current year')
     parser.add_argument('--year', type=int, help='Specify the year to process (default: current year)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
+    parser.add_argument('--current', action='store_true', help='Process the current week instead of the last completed week')
     args = parser.parse_args()
     
     # Load configuration
@@ -783,6 +811,8 @@ def main():
         logging.debug(f"Fill-in mode enabled: {args.fill_all_weeks}")
         if args.year:
             logging.debug(f"Processing year: {args.year}")
+        if args.current:
+            logging.debug(f"Processing current week instead of last week")
     
     # Validate environment variables
     validate_env_vars(config)
@@ -797,9 +827,13 @@ def main():
             logging.info(f"Fill-in mode activated. Will add reports for all missing weeks{year_msg}.")
             fill_in_missing_weeks(toggl_service, confluence_service, args.year)
         else:
-            # Regular mode - process most recent week
-            logging.info("Processing the most recent week...")
-            process_week(toggl_service, confluence_service, DateUtils.get_last_week_dates())
+            # Use current week or last week based on the flag
+            if args.current:
+                logging.info("Processing the current week...")
+                process_week(toggl_service, confluence_service, DateUtils.get_current_week_dates())
+            else:
+                logging.info("Processing the most recent completed week...")
+                process_week(toggl_service, confluence_service, DateUtils.get_last_week_dates())
         
         logging.info("All operations completed successfully!")
     except Exception as e:

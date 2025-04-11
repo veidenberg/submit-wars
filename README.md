@@ -15,12 +15,17 @@ It's time to submit WARs - with a single command. This python script fetches tim
 
 ## Usage
 
-Update the Confluence page with your WAR records for the most recent complete week:
+Submit your WARs for the most recent complete week:
 ```
 python submit_wars.py
 ```
 
-Backfill WARs for all missing weeks in the current year:
+Submit the current week:
+```
+python submit_wars.py --current
+```
+
+Backfill all the missing WARs for the current year:
 ```
 python submit_wars.py --fill-all-weeks
 ```
