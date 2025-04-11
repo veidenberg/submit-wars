@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
+import html
 import os
 import sys
-import json
 import base64
 import re
 import argparse
@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 import requests
 from pathlib import Path
 from dotenv import load_dotenv
-import html  # Add this import at the top of the file
 
 # ============================================================================
 # CONFIGURATION
@@ -350,10 +349,12 @@ class ConfluenceService(ApiService):
         if not week_match:
             return False, False
         
-        # Week exists, check if user heading exists in this week's content
-        week_content = week_match.group(1)
+        # Get the content of this week section
+        week_section = week_match.group(0)
+        
+        # Check if user heading exists in the week section
         user_pattern = re.compile(f'<h3>{self.display_name}</h3>', re.DOTALL)
-        user_exists = bool(user_pattern.search(week_content))
+        user_exists = bool(user_pattern.search(week_section))
         
         return True, user_exists
     
