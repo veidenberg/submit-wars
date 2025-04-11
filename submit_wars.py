@@ -363,7 +363,7 @@ class ConfluenceService(ApiService):
         _, user_exists = self._check_content_exists(content, week_end_date)
         return user_exists
     
-    def post_report(self, formatted_content, date_range=None):
+    def post_report(self, formatted_content, date_range=None, replace=False):
         """Post a report to Confluence"""
         # Get current page content
         current_page_data = self.get_page_content()
@@ -375,7 +375,8 @@ class ConfluenceService(ApiService):
         updated_content, status = self.prepare_updated_content(
             current_page_data['content'],
             formatted_content,
-            week_info
+            week_info,
+            replace
         )
         
         # Only update if content has changed
@@ -451,7 +452,7 @@ class ConfluenceService(ApiService):
             logging.error(error_msg)
             raise
     
-    def prepare_updated_content(self, current_content, formatted_content, week_info):
+    def prepare_updated_content(self, current_content, formatted_content, week_info, replace=False):
         """Prepare the updated content for the Confluence page"""
         month = week_info['month']
         week_end_date = week_info['week_end_date']
@@ -459,13 +460,13 @@ class ConfluenceService(ApiService):
         # Check if user already has content for this week
         _, user_exists = self._check_content_exists(current_content, week_end_date)
         
-        if user_exists:
+        if user_exists and not replace:
             return current_content, f"Report already exists for week ending {week_end_date}."
         
         # Extract all month sections and update
         month_sections = self.extract_month_sections(current_content)
         updated_sections = self.add_content_to_sections(
-            month_sections, month, week_end_date, formatted_content
+            month_sections, month, week_end_date, formatted_content, replace
         )
         
         # Generate ordered content
@@ -475,7 +476,9 @@ class ConfluenceService(ApiService):
         week_exists = bool(re.search(f'<h2>w/e {week_end_date}</h2>', current_content))
         month_exists = bool(re.search(f'<h1>{month}</h1>', current_content))
         
-        if user_exists:
+        if user_exists and replace:
+            status = f"Replaced existing report for week ending {week_end_date}."
+        elif user_exists:
             status = f"Report already exists for week ending {week_end_date}."
         elif week_exists:
             status = f"Added report to existing week ending {week_end_date}."
@@ -499,7 +502,7 @@ class ConfluenceService(ApiService):
         
         return month_sections
     
-    def add_content_to_sections(self, sections, month, week_end_date, formatted_content):
+    def add_content_to_sections(self, sections, month, week_end_date, formatted_content, replace=False):
         """Add new content to the appropriate section"""
         updated_sections = sections.copy()
         
@@ -507,7 +510,11 @@ class ConfluenceService(ApiService):
             month_content = updated_sections[month]
             week_exists, user_exists = self._check_content_exists(month_content, week_end_date)
             
-            if user_exists:
+            if user_exists and replace:
+                updated_sections[month] = self._replace_user_content(
+                    month_content, week_end_date, formatted_content
+                )
+            elif user_exists:
                 return updated_sections
             elif week_exists:
                 updated_sections[month] = self._add_to_existing_week(
@@ -528,6 +535,38 @@ class ConfluenceService(ApiService):
             updated_sections[month] = new_section
         
         return updated_sections
+    
+    def _replace_user_content(self, content, week_end_date, formatted_content):
+        """Replace existing content for a user in a specific week"""
+        # Find the week section
+        week_pattern = re.compile(f'<h2>w/e {week_end_date}</h2>(.*?)(?=<h2>|$)', re.DOTALL)
+        week_match = week_pattern.search(content)
+        
+        if not week_match:
+            return content
+        
+        # Get the week content
+        week_content = week_match.group(0)
+        
+        # Find the user section in this week
+        user_pattern = re.compile(f'<h3>{self.display_name}</h3>(.*?)(?=<h3>|<h2>|$)', re.DOTALL)
+        user_match = user_pattern.search(week_content)
+        
+        if not user_match:
+            return content
+        
+        # Replace the user's content
+        user_section_start = user_match.start() + len(f'<h3>{self.display_name}</h3>')
+        user_section_end = user_match.end()
+        
+        replaced_week_content = (
+            week_content[:user_section_start] + 
+            "\n" + formatted_content + 
+            week_content[user_section_end:]
+        )
+        
+        # Replace the entire week section in the content
+        return content.replace(week_content, replaced_week_content)
     
     def _add_to_existing_week(self, content, week_end_date, formatted_content):
         """Add user section to existing week"""
@@ -667,7 +706,7 @@ def validate_env_vars(config):
             logging.error(f"ERROR: {var_name} is not set in environment variables")
         sys.exit(1)
 
-def process_week(toggl_service, confluence_service, date_range, existing_project_map=None):
+def process_week(toggl_service, confluence_service, date_range, existing_project_map=None, replace=False):
     """Process a single week and post to Confluence"""
     week_date_str = date_range['end_date'].strftime('%d/%m')
     logging.debug(f"Fetching time records for week ending {week_date_str}...")
@@ -681,13 +720,10 @@ def process_week(toggl_service, confluence_service, date_range, existing_project
     if not time_records:
         raise Exception("No time records found for this period")
     
-    #if time_records and logging.getLogger().level == logging.DEBUG:
-    #    logging.debug(f"Sample time record: {json.dumps(time_records[0:1])}")
-    
     formatted_report = format_time_records(time_records, project_map)
-    confluence_service.post_report(formatted_report, date_range)
+    confluence_service.post_report(formatted_report, date_range, replace)
 
-def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
+def fill_in_missing_weeks(toggl_service, confluence_service, year=None, replace=False):
     """Fill in reports for all weeks in the specified year in a single update"""
     all_weeks = DateUtils.get_all_weeks_in_year(year)
     year_str = year or datetime.now().year
@@ -699,7 +735,7 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
     # Fetch project map once
     project_map = toggl_service.fetch_projects()
     
-    stats = {'processed': 0, 'skipped': 0, 'errors': 0, 'no_data': 0}
+    stats = {'processed': 0, 'skipped': 0, 'errors': 0, 'no_data': 0, 'replaced': 0}
     weeks_to_process = []
 
     # Process newest weeks first
@@ -716,10 +752,13 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
         
         # Check if the week already exists
         week_exists = confluence_service.has_week_for_user(existing_content, week_end_date_str)
-        if week_exists:
+        if week_exists and not replace:
             logging.info(f"✓ Report already exists for week ending {week_end_date_str}. Skipping.")
             stats['skipped'] += 1
             continue
+        elif week_exists and replace:
+            logging.info(f"⟳ Report exists for week ending {week_end_date_str}. Will replace.")
+            stats['replaced'] += 1
         
         try:
             # Fetch time records and format the report
@@ -730,7 +769,8 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
                 continue
             else:
                 formatted_report = format_time_records(time_records, project_map)
-                stats['processed'] += 1
+                if not week_exists:
+                    stats['processed'] += 1
             
             # Store this week for batch processing
             weeks_to_process.append({
@@ -759,7 +799,8 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
                     month_sections, 
                     week['month'],
                     week['week_end_date'],
-                    week['content']
+                    week['content'],
+                    replace
                 )
             
             # Generate the final content with proper month ordering
@@ -772,7 +813,8 @@ def fill_in_missing_weeks(toggl_service, confluence_service, year=None):
                     final_content,
                     current_page_data['version']
                 )
-                logging.info(f"Successfully updated {len(weeks_to_process)} weeks in a single batch.")
+                processed_count = stats['processed'] + stats['replaced']
+                logging.info(f"Successfully updated {processed_count} weeks in a single batch.")
             else:
                 logging.info("No changes needed to the page content.")
                 
@@ -789,6 +831,8 @@ def print_summary(stats, total_weeks):
     logging.info("\n===== Summary =====")
     logging.info(f"Total weeks found: {total_weeks}")
     logging.info(f"Weeks successfully processed: {stats['processed']}")
+    if 'replaced' in stats and stats['replaced'] > 0:
+        logging.info(f"Weeks with replaced content: {stats['replaced']}")
     logging.info(f"Weeks skipped (already existed): {stats['skipped']}")
     logging.info(f"Weeks with no time data: {stats['no_data']}")
     logging.info(f"Weeks with errors: {stats['errors']}")
@@ -801,6 +845,7 @@ def main():
     parser.add_argument('--year', type=int, help='Specify the year to process (default: current year)')
     parser.add_argument('--verbose', action='store_true', help='Enable verbose logging')
     parser.add_argument('--current', action='store_true', help='Process the current week instead of the last completed week')
+    parser.add_argument('--replace', action='store_true', help='Replace existing entries instead of skipping them')
     args = parser.parse_args()
     
     # Load configuration
@@ -813,6 +858,8 @@ def main():
             logging.debug(f"Processing year: {args.year}")
         if args.current:
             logging.debug(f"Processing current week instead of last week")
+        if args.replace:
+            logging.debug("Replace mode enabled: Will overwrite existing entries")
     
     # Validate environment variables
     validate_env_vars(config)
@@ -825,15 +872,15 @@ def main():
         if args.fill_all_weeks:
             year_msg = f" for {args.year}" if args.year else ""
             logging.info(f"Fill-in mode activated. Will add reports for all missing weeks{year_msg}.")
-            fill_in_missing_weeks(toggl_service, confluence_service, args.year)
+            fill_in_missing_weeks(toggl_service, confluence_service, args.year, args.replace)
         else:
             # Use current week or last week based on the flag
             if args.current:
                 logging.info("Processing the current week...")
-                process_week(toggl_service, confluence_service, DateUtils.get_current_week_dates())
+                process_week(toggl_service, confluence_service, DateUtils.get_current_week_dates(), replace=args.replace)
             else:
                 logging.info("Processing the most recent completed week...")
-                process_week(toggl_service, confluence_service, DateUtils.get_last_week_dates())
+                process_week(toggl_service, confluence_service, DateUtils.get_last_week_dates(), replace=args.replace)
         
         logging.info("All operations completed successfully!")
     except Exception as e:

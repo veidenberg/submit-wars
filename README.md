@@ -30,6 +30,7 @@ Backfill all the missing WARs for the current year:
 python submit_wars.py --fill-all-weeks
 ```
 Add `--year <year>` to process a specific year. Add `--verbose` for debug output.
+Add `--replace` to overwrite your existing WARs.
 
 ## License
 
