@@ -32,6 +32,10 @@ python submit_wars.py --fill-all-weeks
 Add `--year <year>` to process a specific year. Add `--verbose` for debug output.
 Add `--replace` to overwrite your existing WARs.
 
+## Testing
+
+Run the tests with `pytest` command
+
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for more details.

@@ -300,6 +300,9 @@ class ConfluenceService(ApiService):
         self.username = username
         self.display_name = display_name or username or 'Andres'
         self.date_format = None  # Will store the detected date format
+        # Precompile regex patterns for better performance
+        self._month_pattern = re.compile(r'<h1>([A-Za-z]+)</h1>([\s\S]*?)(?=<h1>|$)')
+        self._unpadded_date_pattern = re.compile(r'<h2>w/e (\d{1}/\d{1,2}|\d{1,2}/\d{1})</h2>')
     
     def get_existing_content(self):
         """Retrieves the existing page content for analysis"""
@@ -311,11 +314,8 @@ class ConfluenceService(ApiService):
     
     def _detect_date_format(self, content):
         """Detect if page uses zero-padded dates or not"""
-        # Look for unpadded dates (e.g., "1/5" instead of "01/05")
-        unpadded_pattern = re.compile(r'<h2>w/e (\d{1}/\d{1,2}|\d{1,2}/\d{1})</h2>')
-        
-        # If we found unpadded dates, use that format
-        if unpadded_pattern.search(content):
+        # Use the precompiled pattern
+        if self._unpadded_date_pattern.search(content):
             self.date_format = "unpadded"
             logging.debug("Detected unpadded date format (e.g. w/e 1/5)")
         else:
@@ -327,7 +327,6 @@ class ConfluenceService(ApiService):
         """Check if week and user exist in content
         Returns a tuple of (week_exists, user_exists)"""
         # Look for the week heading - try both formats if needed
-        # The provided week_end_date might be in either format, so we need to normalize
         day, month = week_end_date.split('/')
         day_num = int(day)
         month_num = int(month)
@@ -457,9 +456,10 @@ class ConfluenceService(ApiService):
         month = week_info['month']
         week_end_date = week_info['week_end_date']
         
-        # Check if user already has content for this week
-        _, user_exists = self._check_content_exists(current_content, week_end_date)
+        # Check if user already has content for this week and get week existence info
+        week_exists, user_exists = self._check_content_exists(current_content, week_end_date)
         
+        # If user content exists and we're not replacing, return early
         if user_exists and not replace:
             return current_content, f"Report already exists for week ending {week_end_date}."
         
@@ -472,29 +472,30 @@ class ConfluenceService(ApiService):
         # Generate ordered content
         ordered_content = self.regenerate_ordered_content(updated_sections)
         
-        # Determine status message
-        week_exists = bool(re.search(f'<h2>w/e {week_end_date}</h2>', current_content))
-        month_exists = bool(re.search(f'<h1>{month}</h1>', current_content))
-        
-        if user_exists and replace:
-            status = f"Replaced existing report for week ending {week_end_date}."
-        elif user_exists:
-            status = f"Report already exists for week ending {week_end_date}."
-        elif week_exists:
-            status = f"Added report to existing week ending {week_end_date}."
-        elif month_exists:
-            status = f"Added new week ending {week_end_date}."
-        else:
-            status = f"Added new month '{month}'."
+        # Determine status message based on what we already know
+        status = self._determine_status_message(month, week_end_date, user_exists, week_exists, 
+                                               month in month_sections, replace)
         
         return ordered_content, status
+    
+    def _determine_status_message(self, month, week_end_date, user_exists, week_exists, month_exists, replace):
+        """Determine appropriate status message based on what was updated"""
+        if user_exists and replace:
+            return f"Replaced existing report for week ending {week_end_date}."
+        elif user_exists:
+            return f"Report already exists for week ending {week_end_date}."
+        elif week_exists:
+            return f"Added report to existing week ending {week_end_date}."
+        elif month_exists:
+            return f"Added new week ending {week_end_date}."
+        else:
+            return f"Added new month '{month}'."
     
     def extract_month_sections(self, content):
         """Extracts all month sections from the content"""
         month_sections = {}
-        month_pattern = re.compile(r'<h1>([A-Za-z]+)</h1>([\s\S]*?)(?=<h1>|$)')
         
-        for match in month_pattern.finditer(content):
+        for match in self._month_pattern.finditer(content):
             month_name = match.group(1)
             if month_name in self.MONTH_NAMES:
                 month_sections[month_name] = match.group(0)
