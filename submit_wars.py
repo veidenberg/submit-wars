@@ -303,6 +303,15 @@ class ConfluenceService(ApiService):
         self._month_pattern = re.compile(r'<h1>([A-Za-z]+)</h1>([\s\S]*?)(?=<h1>|$)')
         self._unpadded_date_pattern = re.compile(r'<h2>w/e (\d{1}/\d{1,2}|\d{1,2}/\d{1})</h2>')
     
+    def get_confluence_headers(self):
+        """Create headers for Confluence API authentication"""
+        auth_str = f"{self.username}:{self.api_token}"
+        auth_token = base64.b64encode(auth_str.encode()).decode('ascii')
+        return {
+            'Authorization': f"Basic {auth_token}",
+            'Content-Type': 'application/json'
+        }
+    
     def get_existing_content(self):
         """Retrieves the existing page content for analysis"""
         page_data = self.get_page_content()
@@ -390,9 +399,7 @@ class ConfluenceService(ApiService):
         endpoint = f"/rest/api/content/{self.page_id}?expand=body.storage,version"
         
         try:
-            response = self.get(endpoint, {
-                'Authorization': f"Bearer {self.api_token}"
-            })
+            response = self.get(endpoint, self.get_confluence_headers())
             
             return {
                 'content': response['body']['storage']['value'],
@@ -424,7 +431,7 @@ class ConfluenceService(ApiService):
             
             # Use requests directly for better error handling
             url = f"{self.base_url}{endpoint}"
-            headers = {'Authorization': f"Bearer {self.api_token}", 'Content-Type': 'application/json'}
+            headers = self.get_confluence_headers()
             
             response = requests.put(url, json=payload, headers=headers)
             
