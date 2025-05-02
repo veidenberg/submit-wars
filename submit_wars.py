@@ -40,7 +40,6 @@ def load_config():
         'confluence': {
             'username': os.getenv('CONFLUENCE_USERNAME'),
             'api_token': os.getenv('CONFLUENCE_API_TOKEN'),
-            'space_key': os.getenv('CONFLUENCE_SPACE_KEY'),
             'page_id': os.getenv('CONFLUENCE_PAGE_ID'),
             'base_url': os.getenv('CONFLUENCE_BASE_URL'),
             'display_name': os.getenv('CONFLUENCE_DISPLAY_NAME') or os.getenv('CONFLUENCE_USERNAME') or 'Andres',
@@ -292,9 +291,8 @@ class ConfluenceService(ApiService):
     MONTH_NAMES = ["January", "February", "March", "April", "May", "June", 
                    "July", "August", "September", "October", "November", "December"]
     
-    def __init__(self, base_url, api_token, space_key, page_id, username, display_name=None):
+    def __init__(self, base_url, api_token, page_id, username, display_name=None):
         super().__init__(base_url, api_token)
-        self.space_key = space_key
         self.page_id = page_id
         self.username = username
         self.display_name = display_name or username or 'Andres'

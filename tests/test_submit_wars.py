@@ -77,7 +77,6 @@ class TestConfluenceService(unittest.TestCase):
             self.confluence = ConfluenceService(
                 base_url="https://example.org",
                 api_token="fake-token",
-                space_key="TEST",
                 page_id="12345",
                 username="testuser",
                 display_name="Test User"
